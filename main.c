@@ -1,5 +1,7 @@
 #include "NU32.h"          // config bits, constants, funcs for startup and UART
 #include "encoder.h"// include other header files here
+#include "current_controller.h"
+#include "utilities.h"
 #include <stdio.h>
 
 #define VOLTS_PER_COUNT (3.3/1024)
@@ -12,11 +14,15 @@
 
 #define BUF_SIZE 200
 
+
+static volatile int pwm = 0;
+
 void adc_intialize(void);
 
 
 void __ISR(_TIMER_2_VECTOR, IPL5SOFT) Controller(void)
 {
+
   static int counter=0;
   static int plotind=0;
   static int decctr=0;
@@ -24,6 +30,32 @@ void __ISR(_TIMER_2_VECTOR, IPL5SOFT) Controller(void)
   static float u = 0;
   static float unew = 0;
 
+
+  switch (get_mode()){
+    case PWM:
+    {
+      OC1RS = abs(pwm) * 20;
+      if(pwm<0){
+        LATDbits.LATD8 = 1; // setting motor direction, phase
+      }
+      else {
+        LATDbits.LATD8 = 0;
+      }
+      break;
+
+
+    case IDLE:
+    {
+
+      pwm = 0;
+      OC1RS = 0;            // 0 duty cycle => H-bridge in brake mode
+      break;
+}
+}
+  }
+
+
+  IFS0bits.T2IF = 0;
 }
 
 
@@ -59,6 +91,7 @@ int main()
   NU32_LED1 = 1;  // turn off the LEDs
   NU32_LED2 = 1;
   __builtin_disable_interrupts();
+  current_init();
   encoder_init(); // in future, initialize modules or peripherals here
   __builtin_enable_interrupts();
 
@@ -111,6 +144,24 @@ int main()
         break;
       }
 
+      case 'f':                      // dummy command for demonstration purposes
+      {
+        NU32_ReadUART3(buffer,BUF_SIZE);
+        sscanf(buffer,"%d", &pwm);
+        set_mode(PWM);
+        sprintf(buffer,"%d\r\n",pwm);
+        NU32_WriteUART3(buffer);
+break;
+      }
+
+      case 'p':
+      {
+        set_mode(IDLE);
+        sprintf(buffer,"%d\r\n",0);
+        NU32_WriteUART3(buffer);
+        break;
+}
+
       case 'r':                      // get mode
             {
               sprintf(buffer, "%d\r\n", get_mode());
@@ -128,7 +179,9 @@ int main()
         break;
       }
     }
+
   }
+  IFS0bits.T1IF = 0;     //reset the interrupt flag
   return 0;
 }
 
